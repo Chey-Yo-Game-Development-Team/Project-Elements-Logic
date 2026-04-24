@@ -144,7 +144,7 @@ def calculate_damage(
     3枚のカードと対応するキャラクターからダメージを計算する。
 
     - コンボ倍率（ジョーカー変換済み）を適用。
-    - 属性一致ボーナス（1.2x）: カードの「変換後属性」がキャラ属性と一致する場合に乗算。
+    - 装備者一致ボーナス（1.2x）: カードをセットしたキャラクターがそのカードを使用した場合に乗算。
 
     Args:
         cards: プレイされた3枚のカード（順序はキャラ対応と一致させること）
@@ -161,12 +161,11 @@ def calculate_damage(
     multipliers = combo_result.get_multipliers()
 
     card_damages: List[float] = []
-    for i, (card, char, mult) in enumerate(zip(cards, characters, multipliers)):
-        resolved_attr = combo_result.resolved_attributes[i]
+    for card, char, mult in zip(cards, characters, multipliers):
         damage = card.base_power * mult
 
-        # 属性一致ボーナス: ジョーカー変換後の属性がキャラ属性と一致する場合のみ
-        if resolved_attr == char.attribute and resolved_attr != Attribute.TYPELESS:
+        # 装備者一致ボーナス: カードを装備したキャラクター自身が使用した場合のみ
+        if card.owner == char.name:
             damage *= 1.2
 
         card_damages.append(damage)

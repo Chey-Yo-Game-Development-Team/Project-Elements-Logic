@@ -34,15 +34,15 @@ class Position(Enum):
 class Card:
     attribute: Attribute
     base_power: float
+    owner: str = field(default="")
 
     def __repr__(self) -> str:
-        return f"Card({self.attribute.value}, {self.base_power})"
+        return f"Card({self.attribute.value}, {self.base_power}, owner={self.owner!r})"
 
 
 @dataclass
 class Character:
     name: str
-    attribute: Attribute
     max_hp: int
     position: Position
     cards: List[Card]
@@ -53,6 +53,8 @@ class Character:
         self.current_hp = self.max_hp
         if len(self.cards) != 3:
             raise ValueError(f"キャラクター '{self.name}' のカードは3枚必要です（現在: {len(self.cards)}枚）")
+        for card in self.cards:
+            card.owner = self.name
 
     @property
     def is_alive(self) -> bool:
@@ -71,7 +73,7 @@ class Character:
 
     def __repr__(self) -> str:
         return (
-            f"Character({self.name}, {self.attribute.value}, "
+            f"Character({self.name}, "
             f"HP:{self.current_hp}/{self.max_hp}, {self.position.value})"
         )
 
@@ -90,14 +92,17 @@ class Party:
         self.deck = [card for char in self.characters for card in char.cards]
         random.shuffle(self.deck)
         self.hand = []
-        self.draw_to_fill()
+        # ターン開始時に draw_hand() を呼ぶ設計のため、ここでは引かない
 
-    def draw_to_fill(self) -> None:
-        """手札が3枚になるまでデッキから補充する。デッキ切れの場合はリシャッフル。"""
+    def draw_hand(self) -> bool:
+        """デッキから3枚引いて手札にする。リシャッフルが発生した場合True を返す。"""
+        reshuffled = False
         while len(self.hand) < 3:
             if not self.deck:
                 self.reshuffle()
+                reshuffled = True
             self.hand.append(self.deck.pop(0))
+        return reshuffled
 
     def reshuffle(self) -> None:
         """デッキを9枚に戻してシャッフルする。"""
@@ -105,10 +110,9 @@ class Party:
         random.shuffle(self.deck)
 
     def play_hand(self) -> List[Card]:
-        """手札3枚を全てプレイして返す。次のターン用に手札を補充する。"""
+        """手札3枚を全てプレイして返す。補充は行わない（次ターン開始時に draw_hand() を呼ぶ）。"""
         played = self.hand[:]
         self.hand = []
-        self.draw_to_fill()
         return played
 
     @property

@@ -22,10 +22,10 @@ def make_cards(*attrs: Attribute, power: float = 10.0):
     return [Card(a, power) for a in attrs]
 
 
-def make_char(attr: Attribute, position: Position = Position.MID) -> Character:
+def make_char(attr: Attribute = Attribute.FIRE, position: Position = Position.MID, name: str = "test") -> Character:
     """テスト用キャラクターを生成する（カードは3枚のダミーで固定）。"""
     cards = [Card(attr, 10.0)] * 3
-    return Character(name="test", attribute=attr, max_hp=100, position=position, cards=cards)
+    return Character(name=name, max_hp=100, position=position, cards=cards)
 
 
 # ---------------------------------------------------------------------------
@@ -157,69 +157,136 @@ class TestComboMultipliers:
 # ---------------------------------------------------------------------------
 
 class TestCalculateDamage:
-    def test_flash_no_bonus(self):
-        """フラッシュ成立 + 属性不一致: 10 * 2.5 = 25.0 x3"""
-        cards = make_cards(Attribute.FIRE, Attribute.FIRE, Attribute.FIRE, power=10.0)
-        chars = [make_char(Attribute.WATER)] * 3
-        result = calculate_damage(cards, chars)
+    """装備者一致ボーナス（1.2x）の動作を検証する。"""
+
+    def _chars(self, attrs):
+        """個別名付きキャラクターを生成する。各キャラのカードはそれぞれのキャラがオーナー。"""
+        names = ["alice", "bob", "carol"]
+        return [
+            Character(name=n, max_hp=100, position=Position.MID,
+                      cards=[Card(a, 10.0)] * 3)
+            for n, a in zip(names, attrs)
+        ]
+
+    def test_flash_no_bonus_other_chars_cards(self):
+        """フラッシュ + 全員が他キャラのカードを使用: 10 * 2.5 = 25.0 x3"""
+        chars = self._chars([Attribute.FIRE] * 3)
+        # 循環swap: alice→bob's, bob→carol's, carol→alice's
+        hand = [chars[1].cards[0], chars[2].cards[0], chars[0].cards[0]]
+        result = calculate_damage(hand, chars)
         assert result.total_damage == pytest.approx(75.0)
 
-    def test_flash_with_bonus(self):
-        """フラッシュ成立 + 全員属性一致(火): 10 * 2.5 * 1.2 = 30.0 x3"""
-        cards = make_cards(Attribute.FIRE, Attribute.FIRE, Attribute.FIRE, power=10.0)
-        chars = [make_char(Attribute.FIRE)] * 3
-        result = calculate_damage(cards, chars)
+    def test_flash_with_bonus_own_cards(self):
+        """フラッシュ + 全員が自分のカードを使用: 10 * 2.5 * 1.2 = 30.0 x3"""
+        chars = self._chars([Attribute.FIRE] * 3)
+        hand = [chars[0].cards[0], chars[1].cards[0], chars[2].cards[0]]
+        result = calculate_damage(hand, chars)
         assert result.total_damage == pytest.approx(90.0)
 
-    def test_rainbow_with_partial_bonus(self):
-        """レインボー + 火キャラが火カード使用のみボーナス: 10*1.5*1.2 + 10*1.5 + 10*1.5"""
-        cards = make_cards(Attribute.FIRE, Attribute.WATER, Attribute.LIGHT, power=10.0)
-        chars = [
-            make_char(Attribute.FIRE),   # 一致 → 1.2ボーナス
-            make_char(Attribute.FIRE),   # 不一致
-            make_char(Attribute.FIRE),   # 不一致
-        ]
-        result = calculate_damage(cards, chars)
-        expected = 10 * 1.5 * 1.2 + 10 * 1.5 + 10 * 1.5
-        assert result.total_damage == pytest.approx(expected)
+    def test_rainbow_all_own_cards_bonus(self):
+        """レインボー + 全員が自分のカードを使用: 10 * 1.5 * 1.2 = 18.0 x3"""
+        chars = self._chars([Attribute.FIRE, Attribute.WATER, Attribute.LIGHT])
+        hand = [chars[0].cards[0], chars[1].cards[0], chars[2].cards[0]]
+        result = calculate_damage(hand, chars)
+        assert result.combo_result.combo_type == ComboType.RAINBOW
+        assert result.total_damage == pytest.approx(54.0)
 
-    def test_joker_converted_bonus(self):
+    def test_rainbow_partial_own_cards(self):
+        """レインボー + 1人のみ自分のカード: そのキャラだけボーナス"""
+        chars = self._chars([Attribute.FIRE, Attribute.WATER, Attribute.LIGHT])
+        # alice: own(fire), bob: carol's(light), carol: bob's(water)
+        hand = [chars[0].cards[0], chars[2].cards[0], chars[1].cards[0]]
+        result = calculate_damage(hand, chars)
+        assert result.combo_result.combo_type == ComboType.RAINBOW
+        assert result.card_damages[0] == pytest.approx(18.0)  # 10*1.5*1.2 (own)
+        assert result.card_damages[1] == pytest.approx(15.0)  # 10*1.5
+        assert result.card_damages[2] == pytest.approx(15.0)  # 10*1.5
+        assert result.total_damage == pytest.approx(48.0)
+
+    def test_joker_own_card_gets_bonus(self):
         """
         [火, 火, 無] → フラッシュ(火)に変換。
-        無属性キャラが変換後の火カードを使うため一致ボーナスなし。
-        火キャラが変換後の火カードを使うため一致ボーナスあり。
+        無属性カードも自分のカードなら変換後にボーナス適用。
         """
-        cards = make_cards(Attribute.FIRE, Attribute.FIRE, Attribute.TYPELESS, power=10.0)
-        chars = [
-            make_char(Attribute.FIRE),      # index0: 火カード使用 → ボーナス
-            make_char(Attribute.FIRE),      # index1: 火カード使用 → ボーナス
-            make_char(Attribute.TYPELESS),  # index2: 変換後=火、キャラ=無 → ボーナスなし
-        ]
-        result = calculate_damage(cards, chars)
-        # フラッシュ倍率 2.5: index0,1 → 10*2.5*1.2=30, index2 → 10*2.5=25
+        chars = self._chars([Attribute.FIRE, Attribute.FIRE, Attribute.TYPELESS])
+        hand = [chars[0].cards[0], chars[1].cards[0], chars[2].cards[0]]
+        result = calculate_damage(hand, chars)
         assert result.combo_result.combo_type == ComboType.FLASH
-        assert result.card_damages[0] == pytest.approx(30.0)
-        assert result.card_damages[1] == pytest.approx(30.0)
-        assert result.card_damages[2] == pytest.approx(25.0)
-        assert result.total_damage == pytest.approx(85.0)
+        assert result.card_damages[0] == pytest.approx(30.0)  # 10*2.5*1.2
+        assert result.card_damages[1] == pytest.approx(30.0)  # 10*2.5*1.2
+        assert result.card_damages[2] == pytest.approx(30.0)  # 10*2.5*1.2 (自分の無属性カード)
+        assert result.total_damage == pytest.approx(90.0)
 
-    def test_typeless_card_no_bonus_when_not_converted(self):
-        """TYPELESS カードが変換されず TYPELESS のまま残ることはないが、
-        変換後属性とキャラ属性が不一致ならボーナスなし。"""
-        cards = make_cards(Attribute.FIRE, Attribute.WATER, Attribute.TYPELESS, power=10.0)
-        # [火, 水, 無] → レインボー (無→光)
-        chars = [
-            make_char(Attribute.LIGHT),  # index0: 変換後=火、キャラ=光 → ボーナスなし
-            make_char(Attribute.LIGHT),  # index1: 変換後=水、キャラ=光 → ボーナスなし
-            make_char(Attribute.LIGHT),  # index2: 変換後=光、キャラ=光 → ボーナスあり
-        ]
-        result = calculate_damage(cards, chars)
-        assert result.combo_result.combo_type == ComboType.RAINBOW
-        assert result.card_damages[0] == pytest.approx(15.0)  # 10*1.5
-        assert result.card_damages[1] == pytest.approx(15.0)  # 10*1.5
-        assert result.card_damages[2] == pytest.approx(18.0)  # 10*1.5*1.2
-        assert result.total_damage == pytest.approx(48.0)
+    def test_joker_other_chars_card_no_bonus(self):
+        """他キャラの無属性カードを使用した場合はボーナスなし。"""
+        chars = self._chars([Attribute.FIRE, Attribute.FIRE, Attribute.TYPELESS])
+        # carol(無)のカードを alice がプレイ、alice のカードを carol がプレイ
+        hand = [chars[2].cards[0], chars[1].cards[0], chars[0].cards[0]]
+        result = calculate_damage(hand, chars)
+        assert result.combo_result.combo_type == ComboType.FLASH
+        assert result.card_damages[0] == pytest.approx(25.0)  # 10*2.5 (他キャラのカード)
+        assert result.card_damages[1] == pytest.approx(30.0)  # 10*2.5*1.2 (own)
+        assert result.card_damages[2] == pytest.approx(25.0)  # 10*2.5 (他キャラのカード)
+        assert result.total_damage == pytest.approx(80.0)
 
     def test_invalid_input(self):
         with pytest.raises(ValueError):
-            calculate_damage(make_cards(Attribute.FIRE, Attribute.FIRE), [make_char(Attribute.FIRE)] * 2)
+            calculate_damage(make_cards(Attribute.FIRE, Attribute.FIRE), [make_char()] * 2)
+
+
+# ---------------------------------------------------------------------------
+# §2-4 新仕様: 装備者一致ボーナス
+# ---------------------------------------------------------------------------
+
+class TestOwnershipBonus:
+    """「自分がセットしたカードを使うとボーナス」の新ロジックを検証する。"""
+
+    def _make_named_char(self, name: str, attr: Attribute, position: Position = Position.MID) -> Character:
+        cards = [Card(attr, 10.0)] * 3
+        return Character(name=name, max_hp=100, position=position, cards=cards)
+
+    def test_flash_all_own_cards_bonus(self):
+        """フラッシュ + 全員が自分のカードを使用: 10 * 2.5 * 1.2 = 30.0 x3"""
+        char_a = self._make_named_char("alice", Attribute.FIRE)
+        char_b = self._make_named_char("bob",   Attribute.FIRE)
+        char_c = self._make_named_char("carol", Attribute.FIRE)
+        hand = [char_a.cards[0], char_b.cards[0], char_c.cards[0]]
+        result = calculate_damage(hand, [char_a, char_b, char_c])
+        assert result.combo_result.combo_type == ComboType.FLASH
+        assert result.total_damage == pytest.approx(90.0)
+
+    def test_flash_no_own_cards_no_bonus(self):
+        """フラッシュ + 全員が他キャラのカードを使用: 10 * 2.5 = 25.0 x3"""
+        char_a = self._make_named_char("alice", Attribute.FIRE)
+        char_b = self._make_named_char("bob",   Attribute.FIRE)
+        char_c = self._make_named_char("carol", Attribute.FIRE)
+        # 循環swap: alice→bob's, bob→carol's, carol→alice's
+        hand = [char_b.cards[0], char_c.cards[0], char_a.cards[0]]
+        result = calculate_damage(hand, [char_a, char_b, char_c])
+        assert result.combo_result.combo_type == ComboType.FLASH
+        assert result.total_damage == pytest.approx(75.0)
+
+    def test_partial_own_card_bonus(self):
+        """フラッシュ + 1人だけ自分のカードを使用: そのキャラのみボーナス"""
+        char_a = self._make_named_char("alice", Attribute.FIRE)
+        char_b = self._make_named_char("bob",   Attribute.FIRE)
+        char_c = self._make_named_char("carol", Attribute.FIRE)
+        # alice: 自分, bob: carol's, carol: bob's
+        hand = [char_a.cards[0], char_c.cards[0], char_b.cards[0]]
+        result = calculate_damage(hand, [char_a, char_b, char_c])
+        assert result.card_damages[0] == pytest.approx(30.0)  # 10*2.5*1.2 (own)
+        assert result.card_damages[1] == pytest.approx(25.0)  # 10*2.5 (other)
+        assert result.card_damages[2] == pytest.approx(25.0)  # 10*2.5 (other)
+        assert result.total_damage == pytest.approx(80.0)
+
+    def test_typeless_own_card_gets_bonus(self):
+        """無属性カードも自分のカードなら変換後にボーナス適用。"""
+        char_a = self._make_named_char("alice", Attribute.FIRE)
+        char_b = self._make_named_char("bob",   Attribute.FIRE)
+        char_c = self._make_named_char("carol", Attribute.TYPELESS)
+        hand = [char_a.cards[0], char_b.cards[0], char_c.cards[0]]
+        result = calculate_damage(hand, [char_a, char_b, char_c])
+        assert result.combo_result.combo_type == ComboType.FLASH
+        # carol も自分のカード(無→火変換)なのでボーナスあり
+        assert result.card_damages[2] == pytest.approx(30.0)
+        assert result.total_damage == pytest.approx(90.0)

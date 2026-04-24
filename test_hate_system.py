@@ -23,7 +23,6 @@ def make_char(
     cards = [Card(Attribute.FIRE, 10.0)] * 3
     char = Character(
         name=name,
-        attribute=Attribute.FIRE,
         max_hp=hp,
         position=position,
         cards=cards,

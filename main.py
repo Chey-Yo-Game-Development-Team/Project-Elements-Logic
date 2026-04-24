@@ -98,18 +98,27 @@ def pause(msg: str = "Enterで続ける...") -> None:
         print(f"  >> {msg}")
 
 
+def deck_summary(party: Party) -> str:
+    """山札の残りカード（未使用・未ドロー）をオーナー別にまとめた文字列を返す。"""
+    from collections import Counter
+    counts: Counter[str] = Counter(card.owner for card in party.deck)
+    parts = [f"{char.name}: {counts.get(char.name, 0)}枚" for char in party.characters]
+    total = sum(counts.values())
+    return " / ".join(parts) + f"  (合計: {total}枚)"
+
+
 # ----------------------------------------------------------------
 # ゲームセットアップ
 # ----------------------------------------------------------------
 def setup() -> tuple[Party, Enemy]:
     """
     パーティ構成:
-      アリア  (火 / 前衛): 火カード x3 (威力15)
-      リン    (水 / 中衛): 水カード x3 (威力12)
-      ルクス  (光 / 後衛): 光カード x2 + 無カード x1 (威力13/10)
+      アリア  (前衛): 火カード x3 (威力15)
+      リン    (中衛): 水カード x3 (威力12)
+      ルクス  (後衛): 光カード x2 + 無カード x1 (威力13/10)
     """
-    fire_cards  = [Card(Attribute.FIRE,  15.0)] * 3
-    water_cards = [Card(Attribute.WATER, 12.0)] * 3
+    fire_cards  = [Card(Attribute.FIRE,  15.0) for _ in range(3)]
+    water_cards = [Card(Attribute.WATER, 12.0) for _ in range(3)]
     light_cards = [
         Card(Attribute.LIGHT,    13.0),
         Card(Attribute.LIGHT,    13.0),
@@ -118,15 +127,15 @@ def setup() -> tuple[Party, Enemy]:
 
     characters = [
         Character(
-            name="アリア", attribute=Attribute.FIRE,  max_hp=120,
+            name="アリア", max_hp=120,
             position=Position.FRONT, cards=fire_cards,  base_hate=10.0,
         ),
         Character(
-            name="リン",   attribute=Attribute.WATER, max_hp=100,
+            name="リン",   max_hp=100,
             position=Position.MID,   cards=water_cards, base_hate=10.0,
         ),
         Character(
-            name="ルクス", attribute=Attribute.LIGHT, max_hp=80,
+            name="ルクス", max_hp=80,
             position=Position.BACK,  cards=light_cards, base_hate=10.0,
         ),
     ]
@@ -149,14 +158,22 @@ def process_turn(turn: int, party: Party, enemy: Enemy) -> str | None:
     print(f"  ■ ターン {turn}")
     print(SEP)
 
+    # ── 0. 手札を引く（デッキ切れならリシャッフル）──────────
+    reshuffled = party.draw_hand()
+    if reshuffled:
+        print(f"\n  ★ デッキが0枚！ カードをリシャッフルしました。(9枚に戻す)")
+
     # ── 1. 手札表示 ──────────────────────────────────────
-    hand = party.hand  # play_hand() を呼ぶ前に参照を保持
+    hand = party.hand
     print("\n  [手札]")
     for i, (card, char) in enumerate(zip(hand, party.characters)):
+        is_self = card.owner == char.name
+        self_tag = "  ★自己カード" if is_self else ""
         print(
             f"    スロット{i + 1}: [{ATTR_JP[card.attribute]}]  "
             f"威力 {card.base_power:>4.0f}  "
-            f"(使用者: {char.name} / {POS_JP[char.position]})"
+            f"使用者: {char.name} ({POS_JP[char.position]})  "
+            f"[所有者: {card.owner}]{self_tag}"
         )
 
     print()
@@ -174,9 +191,7 @@ def process_turn(turn: int, party: Party, enemy: Enemy) -> str | None:
     print(f"\n  [ダメージ内訳]")
     for i, (card, char, dmg) in enumerate(zip(hand, casters, result.card_damages)):
         resolved = combo.resolved_attributes[i]
-        bonus = " ★属性一致 (+20%)" if (
-            resolved == char.attribute and resolved != Attribute.TYPELESS
-        ) else ""
+        bonus = " ★自己カード (+20%)" if card.owner == char.name else ""
         print(
             f"    {char.name}: [{ATTR_JP[resolved]}] → "
             f"{dmg:>7.1f} ダメージ{bonus}"
@@ -191,10 +206,8 @@ def process_turn(turn: int, party: Party, enemy: Enemy) -> str | None:
         if char.is_alive:
             HateSystem.add_hate(char, 5.0)
 
-    # ── 4. 手札を消費 → 次の手札を補充（3周目でリシャッフル） ──
+    # ── 4. 手札を消費（補充は次ターン開始時）────────────────
     party.play_hand()
-    if turn % 3 == 0:
-        print(f"\n  ★ デッキが1周しました！ カードをリシャッフルします。")
 
     # ── 5. 勝利判定 ──────────────────────────────────────
     if not enemy.is_alive:
@@ -223,6 +236,11 @@ def process_turn(turn: int, party: Party, enemy: Enemy) -> str | None:
     if not party.alive_characters:
         return "lose"
 
+    # ── 8. 山札残り内訳表示 ──────────────────────────────
+    print(f"\n  [山札残り] {deck_summary(party)}")
+    if len(party.deck) == 0:
+        print(f"  ★ 山札が0枚になりました。次のターン開始時にリシャッフルします。")
+
     return None  # バトル継続
 
 
@@ -237,6 +255,15 @@ def main() -> None:
     print(SEP)
 
     party, enemy = setup()
+
+    # 初期編成の完全表示
+    print("\n  [初期編成] 各キャラクターのデッキ投入カード")
+    print(THIN)
+    for char in party.characters:
+        attr_str = " / ".join(ATTR_JP[c.attribute] for c in char.cards)
+        print(f"    {char.name} ({POS_JP[char.position]}): {attr_str}  (各3枚)")
+    print(THIN)
+
     print_status(party, enemy)
     print()
     pause("ゲームスタート！")
