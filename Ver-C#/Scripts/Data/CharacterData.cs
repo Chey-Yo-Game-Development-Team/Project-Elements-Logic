@@ -23,7 +23,7 @@ namespace ProjectElements.Data
         public string characterName = "New Character";
 
         [Tooltip("キャラクターの属性。")]
-        public Attribute attribute = Attribute.Fire;
+        public Element element = Element.Fire;
 
         // -----------------------------------------------------------------
         // 静的パラメータ（エディタで設定する固定値）

@@ -45,7 +45,7 @@ namespace ProjectElements.Battle
     /// 【インスペクター設定】
     ///   1. characterSetups に3名のキャラクター設定を登録する
     ///   2. enemy に EnemyController を持つ GameObject を紐付ける
-    ///   3. leaderAttribute でパーティリーダーの属性を選ぶ
+    ///   3. leaderElement でパーティリーダーの属性を選ぶ
     /// </summary>
     public class BattleManager : MonoBehaviour
     {
@@ -59,7 +59,7 @@ namespace ProjectElements.Battle
         [SerializeField] private CharacterSetup[] characterSetups = new CharacterSetup[3];
 
         [Tooltip("全カードがジョーカーだった場合のリーダー属性（フォールバック）")]
-        [SerializeField] private Attribute leaderAttribute = Attribute.Fire;
+        [SerializeField] private ProjectElements.Core.Element leaderElement = ProjectElements.Core.Element.Fire;
 
         [Header("敵設定")]
 
@@ -86,12 +86,12 @@ namespace ProjectElements.Battle
         // 日本語表示テーブル（Python の ATTR_JP / POS_JP / COMBO_JP に相当）
         // -----------------------------------------------------------------
 
-        private static readonly Dictionary<Attribute, string> AttrJp = new Dictionary<Attribute, string>
+        private static readonly Dictionary<ProjectElements.Core.Element, string> AttrJp = new Dictionary<ProjectElements.Core.Element, string>
         {
-            { Attribute.Fire,     "火" },
-            { Attribute.Water,    "水" },
-            { Attribute.Light,    "光" },
-            { Attribute.Typeless, "無" },
+            { ProjectElements.Core.Element.Fire,     "火" },
+            { ProjectElements.Core.Element.Water,    "水" },
+            { ProjectElements.Core.Element.Light,    "光" },
+            { ProjectElements.Core.Element.Typeless, "無" },
         };
 
         private static readonly Dictionary<Position, string> PosJp = new Dictionary<Position, string>
@@ -167,7 +167,7 @@ namespace ProjectElements.Battle
             }
 
             // Party の生成（デッキ構築＆シャッフルもここで行われる）
-            _party = new Party(_characters, leaderAttribute);
+            _party = new Party(_characters, leaderElement);
 
             // 敵のリセット
             enemy.Initialize();
@@ -184,7 +184,7 @@ namespace ProjectElements.Battle
             sb.AppendLine("[初期編成]");
             foreach (var chara in _characters)
             {
-                string attrs = string.Join(" / ", chara.Cards.Select(c => AttrJp[c.attribute]));
+                string attrs = string.Join(" / ", chara.Cards.Select(c => AttrJp[c.element]));
                 sb.AppendLine($"  {chara.Name} ({PosJp[chara.Position]}): {attrs}");
             }
             sb.AppendLine("[ヒント] Space キーでターンを進める  /  R キーでリセット");
@@ -221,18 +221,18 @@ namespace ProjectElements.Battle
             {
                 var card  = hand[i];
                 string ownerName = GetOwnerName(card);
-                sb.AppendLine($"  カード{i + 1}: [{AttrJp[card.attribute]}]  " +
+                sb.AppendLine($"  カード{i + 1}: [{AttrJp[card.element]}]  " +
                               $"威力 {card.basePower,4:0}  [所有者: {ownerName}]");
             }
 
             // ── 2. コンボ判定・ダメージ計算 ─────────────────────────────
             CardData[] playedCards = _party.Hand.ToArray();
             DamageResult result    = ComboEngine.CalculateDamage(
-                playedCards, _characters, leaderAttribute);
+                playedCards, _characters, leaderElement);
             ComboResult combo = result.ComboResult;
 
             sb.AppendLine("\n[コンボ判定]");
-            sb.AppendLine($"  変換後属性: {string.Join(" / ", combo.ResolvedAttributes.Select(a => AttrJp[a]))}");
+            sb.AppendLine($"  変換後属性: {string.Join(" / ", combo.ResolvedElements.Select(a => AttrJp[a]))}");
             sb.AppendLine($"  成立役    : {ComboJp[combo.ComboType]}");
 
             // ── 3. ダメージ内訳ログ ────────────────────────────────────

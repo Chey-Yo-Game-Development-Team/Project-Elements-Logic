@@ -28,12 +28,12 @@ namespace ProjectElements.Logic
         /// ジョーカー変換済みの属性配列（要素数=3、Typeless なし）。
         /// インデックスはプレイされたカードの順序と対応している。
         /// </summary>
-        public Attribute[] ResolvedAttributes { get; }
+        public Element[] ResolvedElements { get; }
 
-        public ComboResult(ComboType comboType, Attribute[] resolvedAttributes)
+        public ComboResult(ComboType comboType, Element[] resolvedElements)
         {
             ComboType          = comboType;
-            ResolvedAttributes = resolvedAttributes;
+            ResolvedElements = resolvedElements;
         }
 
         /// <summary>
@@ -52,11 +52,11 @@ namespace ProjectElements.Logic
 
                 case ComboType.Pair:
                     // 2回登場する属性がペアの属性
-                    Attribute pairAttr = ResolvedAttributes
+                    Element pairAttr = ResolvedElements
                         .GroupBy(a => a)
                         .OrderByDescending(g => g.Count())
                         .First().Key;
-                    return ResolvedAttributes
+                    return ResolvedElements
                         .Select(a => a == pairAttr ? 1.2f : 1.0f)
                         .ToArray();
 
@@ -124,9 +124,9 @@ namespace ProjectElements.Logic
     public static class ComboEngine
     {
         // 基本属性リスト（Typeless を除く）
-        // Python の BASIC_ATTRIBUTES に相当
-        private static readonly Attribute[] BasicAttributes =
-            { Attribute.Fire, Attribute.Water, Attribute.Light };
+        // Python の BASIC_ElementS に相当
+        private static readonly Element[] BasicElements =
+            { Element.Fire, Element.Water, Element.Light };
 
         // ---------------------------------------------------------
         // ① コンボ役の純粋判定（Typeless なし前提）
@@ -136,9 +136,9 @@ namespace ProjectElements.Logic
         /// Typeless を含まない3属性の配列からコンボ役を判定して返す。
         /// Python の _judge_combo() に相当。
         /// </summary>
-        private static ComboResult JudgeCombo(Attribute[] attrs)
+        private static ComboResult JudgeCombo(Element[] attrs)
         {
-            var unique = new HashSet<Attribute>(attrs);
+            var unique = new HashSet<Element>(attrs);
 
             // フラッシュ: 3枚すべて同属性
             if (unique.Count == 1)
@@ -157,26 +157,26 @@ namespace ProjectElements.Logic
 
         // ---------------------------------------------------------
         // ② ジョーカー全置換パターンの列挙
-        //    Python の itertools.product(BASIC_ATTRIBUTES, repeat=n) に相当
+        //    Python の itertools.product(BASIC_ElementS, repeat=n) に相当
         // ---------------------------------------------------------
 
         /// <summary>
         /// count 個の置換スロットに対して、基本属性の全組み合わせを列挙する。
         /// count=1 → 3通り、count=2 → 9通り（3×3）。
         /// </summary>
-        private static IEnumerable<Attribute[]> GetReplacementCombinations(int count)
+        private static IEnumerable<Element[]> GetReplacementCombinations(int count)
         {
             if (count == 1)
             {
                 // 1ジョーカー: Fire / Water / Light の3通りを試す
-                foreach (var a in BasicAttributes)
+                foreach (var a in BasicElements)
                     yield return new[] { a };
             }
             else // count == 2
             {
                 // 2ジョーカー: 3×3 = 9通りの直積を試す
-                foreach (var a in BasicAttributes)
-                    foreach (var b in BasicAttributes)
+                foreach (var a in BasicElements)
+                    foreach (var b in BasicElements)
                         yield return new[] { a, b };
             }
         }
@@ -199,7 +199,7 @@ namespace ProjectElements.Logic
         /// </summary>
         public static ComboResult ResolveJokers(
             CardData[]  cards,
-            Attribute   leaderAttribute = Attribute.Fire)
+            Element   leaderElement = Element.Fire)
         {
             if (cards.Length != 3)
                 throw new ArgumentException(
@@ -208,28 +208,28 @@ namespace ProjectElements.Logic
             // Typeless のインデックスを収集
             var typelessIndices = cards
                 .Select((card, idx) => (card, idx))
-                .Where(t => t.card.attribute == Attribute.Typeless)
+                .Where(t => t.card.element == Element.Typeless)
                 .Select(t => t.idx)
                 .ToList();
 
             // ジョーカーなし: そのまま判定
             if (typelessIndices.Count == 0)
-                return JudgeCombo(cards.Select(c => c.attribute).ToArray());
+                return JudgeCombo(cards.Select(c => c.element).ToArray());
 
             // 全3枚ジョーカー: リーダー属性のフラッシュ
             if (typelessIndices.Count == 3)
                 return new ComboResult(
                     ComboType.Flash,
-                    new[] { leaderAttribute, leaderAttribute, leaderAttribute });
+                    new[] { leaderElement, leaderElement, leaderElement });
 
             // 1〜2枚ジョーカー: 全置換パターンを試して最高役を選ぶ
-            Attribute[] baseAttrs = cards.Select(c => c.attribute).ToArray();
+            Element[] baseAttrs = cards.Select(c => c.element).ToArray();
             ComboResult best      = null;
 
             foreach (var replacement in GetReplacementCombinations(typelessIndices.Count))
             {
                 // 元の配列を壊さないようにコピーしてから置換
-                Attribute[] trial = (Attribute[])baseAttrs.Clone();
+                Element[] trial = (Element[])baseAttrs.Clone();
                 for (int i = 0; i < typelessIndices.Count; i++)
                     trial[typelessIndices[i]] = replacement[i];
 
@@ -260,7 +260,7 @@ namespace ProjectElements.Logic
         public static DamageResult CalculateDamage(
             CardData[]       playedCards,
             BattleCharacter[] characters,
-            Attribute        leaderAttribute = Attribute.Fire)
+            Element        leaderElement = Element.Fire)
         {
             if (playedCards.Length != 3)
                 throw new ArgumentException("プレイされるカードは3枚である必要があります");
@@ -268,7 +268,7 @@ namespace ProjectElements.Logic
                 throw new ArgumentException("攻撃を行うキャラクターがパーティに存在しません");
 
             // 1. コンボ判定（ジョーカー変換含む）
-            ComboResult comboResult     = ResolveJokers(playedCards, leaderAttribute);
+            ComboResult comboResult     = ResolveJokers(playedCards, leaderElement);
             float       comboMultiplier = comboResult.TotalMultiplier;
 
             var characterDamages = new float[characters.Length];

@@ -7,7 +7,7 @@ namespace ProjectElements.Core
     /// カードおよびキャラクターの属性。
     /// TYPELESS は無属性（ジョーカー）として機能する。
     /// </summary>
-    public enum Attribute
+    public enum Element
     {
         Fire,
         Water,

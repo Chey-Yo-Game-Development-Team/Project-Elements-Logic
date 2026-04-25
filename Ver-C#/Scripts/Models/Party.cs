@@ -24,7 +24,7 @@ namespace ProjectElements.Models
         public BattleCharacter[] Characters { get; }
 
         /// <summary>全カードがジョーカーだった場合のフォールバック属性（パーティリーダー属性）。</summary>
-        public Attribute LeaderAttribute { get; }
+        public Element LeaderElement { get; }
 
         /// <summary>山札の残り枚数。</summary>
         public int DeckCount => _deck.Count;
@@ -52,18 +52,18 @@ namespace ProjectElements.Models
         // -----------------------------------------------------------------
 
         /// <param name="characters">パーティメンバー3名</param>
-        /// <param name="leaderAttribute">全ジョーカー時のフォールバック属性（デフォルト: Fire）</param>
+        /// <param name="leaderElement">全ジョーカー時のフォールバック属性（デフォルト: Fire）</param>
         /// <param name="seed">シャッフルのシード値（0 以下で時刻ベースのランダム）</param>
         public Party(
             BattleCharacter[] characters,
-            Attribute leaderAttribute = Attribute.Fire,
+            Element leaderElement = Element.Fire,
             int seed = 0)
         {
             if (characters == null || characters.Length != 3)
                 throw new ArgumentException("パーティは3名必要です");
 
             Characters      = characters;
-            LeaderAttribute = leaderAttribute;
+            LeaderElement = leaderElement;
             _rng            = seed > 0 ? new System.Random(seed) : new System.Random();
             _deck           = new List<CardData>(9);
             _hand           = new List<CardData>(3);

@@ -22,7 +22,7 @@ namespace ProjectElements.Data
         public string cardName = "New Card";
 
         [Tooltip("カードの属性。Typeless はジョーカーとして機能する。")]
-        public Attribute attribute = Attribute.Fire;
+        public Element element = Element.Fire;
 
         [Tooltip("このカードの基礎威力。ダメージ計算の乗算元になる。")]
         [Min(0f)]

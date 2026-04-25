@@ -62,7 +62,7 @@ namespace ProjectElements.Models
         public string  Name         => Data.characterName;
         public int     MaxHp        => Data.maxHp;
         public float   AttackPower  => Data.attackPower;
-        public Attribute Attribute  => Data.attribute;
+        public Element Element  => Data.element;
         public CardData[] Cards     => Data.cards;
 
         // -----------------------------------------------------------------
