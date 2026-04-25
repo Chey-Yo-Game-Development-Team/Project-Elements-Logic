@@ -29,6 +29,10 @@ namespace ProjectElements.Battle
 
         [Tooltip("このキャラクターのバトル開始時のポジション")]
         public Position initialPosition = Position.Mid;
+
+        // ★追加：3Dモデルを設定する項目
+        [Tooltip("シーンに生成するキャラクターの3Dモデル（Prefab）")]
+        public GameObject characterPrefab;
     }
 
     // =========================================================
@@ -66,6 +70,12 @@ namespace ProjectElements.Battle
         [Tooltip("シーン上の EnemyController を持つ GameObject")]
         [SerializeField] private EnemyController enemy;
 
+        // ★追加：キャラクターを立たせる位置（Transform）の設定
+        [Header("配置設定（各ポジションの目印となる空のGameObject等をセット）")]
+        [SerializeField] private Transform frontPosition;
+        [SerializeField] private Transform midPosition;
+        [SerializeField] private Transform backPosition;
+
         [Header("デバッグ設定")]
 
         [Tooltip("ON にすると Start() 時に自動でバトルを開始する")]
@@ -79,6 +89,9 @@ namespace ProjectElements.Battle
         private BattleCharacter[] _characters;
         private int               _turn;
         private BattleState       _state;
+
+        // ★追加：生成した3Dモデルを管理するためのリスト（リセット時に消すため）
+        private List<GameObject> _spawnedModels = new List<GameObject>();
 
         private enum BattleState { Idle, InProgress, Victory, Defeat }
 
@@ -153,6 +166,13 @@ namespace ProjectElements.Battle
                 return;
             }
 
+            // ★追加：リセット時、前回生成したモデルが残っていれば削除する
+            foreach (var model in _spawnedModels)
+            {
+                if (model != null) Destroy(model);
+            }
+            _spawnedModels.Clear();
+
             // BattleCharacter の生成
             _characters = new BattleCharacter[3];
             for (int i = 0; i < 3; i++)
@@ -164,6 +184,41 @@ namespace ProjectElements.Battle
                     return;
                 }
                 _characters[i] = new BattleCharacter(setup.data, setup.initialPosition);
+
+                // ★追加：3Dモデルの生成と配置処理
+                if (setup.characterPrefab != null)
+                {
+                    // ポジションに応じた場所を取得
+                    Transform spawnPoint = GetSpawnTransform(setup.initialPosition);
+                    Vector3 spawnPos = spawnPoint != null ? spawnPoint.position : Vector3.zero;
+                    Quaternion spawnRot = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
+
+                    // モデルを生成し、リストに記録
+                    GameObject spawnedObj = Instantiate(setup.characterPrefab, spawnPos, spawnRot);
+                    _spawnedModels.Add(spawnedObj);
+                }
+                else
+                {
+                    Debug.LogWarning($"[BattleManager] {setup.data.name} の3Dモデル(Character Prefab)が未設定のため、仮Cubeで代用します。");
+
+                    Transform spawnPoint = GetSpawnTransform(setup.initialPosition);
+                    Vector3 spawnPos     = spawnPoint != null ? spawnPoint.position : Vector3.zero;
+
+                    GameObject placeholder = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    placeholder.name      = $"[Placeholder] {setup.data.characterName}";
+                    placeholder.transform.position = spawnPos;
+                    placeholder.transform.localScale = Vector3.one;
+
+                    // キャラクターごとに色を変えて視覚的に区別する
+                    var renderer = placeholder.GetComponent<Renderer>();
+                    if (renderer != null)
+                    {
+                        renderer.material = new Material(Shader.Find("Standard"));
+                        renderer.material.color = GetPlaceholderColor(i);
+                    }
+
+                    _spawnedModels.Add(placeholder);
+                }
             }
 
             // Party の生成（デッキ構築＆シャッフルもここで行われる）
@@ -356,6 +411,32 @@ namespace ProjectElements.Battle
         // -----------------------------------------------------------------
         // 内部ヘルパー
         // -----------------------------------------------------------------
+
+        /// <summary>
+        /// 指定した Position に対応する Transform を返すヘルパーメソッド。
+        /// </summary>
+        private Transform GetSpawnTransform(Position pos)
+        {
+            switch (pos)
+            {
+                case Position.Front: return frontPosition;
+                case Position.Mid:   return midPosition;
+                case Position.Back:  return backPosition;
+                default:             return midPosition;
+            }
+        }
+
+        /// <summary>インデックスに対応するプレースホルダーCubeの色を返す。</summary>
+        private static Color GetPlaceholderColor(int index)
+        {
+            switch (index)
+            {
+                case 0:  return Color.cyan;
+                case 1:  return Color.green;
+                case 2:  return Color.yellow;
+                default: return Color.white;
+            }
+        }
 
         /// <summary>
         /// 指定した CardData を所持しているキャラクターの名前を返す。

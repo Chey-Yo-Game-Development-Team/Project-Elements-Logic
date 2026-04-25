@@ -21,6 +21,7 @@ namespace ProjectElements.Data
 
         [Tooltip("キャラクターの表示名（例: アリア）")]
         public string characterName = "New Character";
+        public GameObject visualPrefab;
 
         [Tooltip("キャラクターの属性。")]
         public Element element = Element.Fire;
