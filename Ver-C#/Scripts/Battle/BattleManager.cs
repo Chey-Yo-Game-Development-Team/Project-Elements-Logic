@@ -3,6 +3,7 @@
 // インスペクターで CharacterData・ポジション・敵を設定し、
 // Space キーを押すたびに1ターンが進む。
 
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -11,6 +12,7 @@ using ProjectElements.Core;
 using ProjectElements.Data;
 using ProjectElements.Models;
 using ProjectElements.Logic;
+using ProjectElements.UI;
 
 namespace ProjectElements.Battle
 {
@@ -76,6 +78,10 @@ namespace ProjectElements.Battle
         [SerializeField] private Transform midPosition;
         [SerializeField] private Transform backPosition;
 
+        [Header("UI設定")]
+        [Tooltip("カード手札UIを管理する BattleUI コンポーネント。未設定の場合は自動生成する。")]
+        [SerializeField] private BattleUI battleUI;
+
         [Header("デバッグ設定")]
 
         [Tooltip("ON にすると Start() 時に自動でバトルを開始する")]
@@ -90,8 +96,9 @@ namespace ProjectElements.Battle
         private int               _turn;
         private BattleState       _state;
 
-        // ★追加：生成した3Dモデルを管理するためのリスト（リセット時に消すため）
-        private List<GameObject> _spawnedModels = new List<GameObject>();
+        // ★追加：生成した3Dモデルを管理するための辞書（リセット時に消すため）
+        private Dictionary<BattleCharacter, GameObject> _characterModels =
+            new Dictionary<BattleCharacter, GameObject>();
 
         private enum BattleState { Idle, InProgress, Victory, Defeat }
 
@@ -128,17 +135,18 @@ namespace ProjectElements.Battle
 
         private void Start()
         {
+            if (battleUI == null)
+            {
+                var uiGO = new GameObject("BattleUIController");
+                battleUI  = uiGO.AddComponent<BattleUI>();
+            }
+
             if (autoStartOnPlay)
                 StartBattle();
         }
 
         private void Update()
         {
-            // Space: 1ターン進める
-            if (Input.GetKeyDown(KeyCode.Space) && _state == BattleState.InProgress)
-                ProcessTurn();
-
-            // R: バトルをリセット
             if (Input.GetKeyDown(KeyCode.R))
                 StartBattle();
         }
@@ -166,12 +174,15 @@ namespace ProjectElements.Battle
                 return;
             }
 
+            battleUI.OnSelectionComplete -= OnCardsSelected;
+            battleUI.OnSelectionComplete += OnCardsSelected;
+
             // ★追加：リセット時、前回生成したモデルが残っていれば削除する
-            foreach (var model in _spawnedModels)
+            foreach (var model in _characterModels.Values)
             {
                 if (model != null) Destroy(model);
             }
-            _spawnedModels.Clear();
+            _characterModels.Clear();
 
             // BattleCharacter の生成
             _characters = new BattleCharacter[3];
@@ -193,9 +204,9 @@ namespace ProjectElements.Battle
                     Vector3 spawnPos = spawnPoint != null ? spawnPoint.position : Vector3.zero;
                     Quaternion spawnRot = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
 
-                    // モデルを生成し、リストに記録
+                    // モデルを生成し、辞書に記録
                     GameObject spawnedObj = Instantiate(setup.characterPrefab, spawnPos, spawnRot);
-                    _spawnedModels.Add(spawnedObj);
+                    _characterModels[_characters[i]] = spawnedObj;
                 }
                 else
                 {
@@ -217,7 +228,7 @@ namespace ProjectElements.Battle
                         renderer.material.color = GetPlaceholderColor(i);
                     }
 
-                    _spawnedModels.Add(placeholder);
+                    _characterModels[_characters[i]] = placeholder;
                 }
             }
 
@@ -242,16 +253,139 @@ namespace ProjectElements.Battle
                 string attrs = string.Join(" / ", chara.Cards.Select(c => AttrJp[c.element]));
                 sb.AppendLine($"  {chara.Name} ({PosJp[chara.Position]}): {attrs}");
             }
-            sb.AppendLine("[ヒント] Space キーでターンを進める  /  R キーでリセット");
+            sb.AppendLine("[ヒント] 手札から3枚選んでターンを進める  /  R キーでリセット");
             Debug.Log(sb.ToString());
 
             LogStatus();
+            _party.DrawHand();
+            battleUI.ShowHand(_party.Hand);
+        }
+
+        /// <summary>
+        /// BattleUI から3枚選択完了時に呼ばれる。
+        /// ダメージ計算後に RushCoroutine を起動する。
+        /// </summary>
+        private void OnCardsSelected(CardData[] selectedCards)
+        {
+            if (_state != BattleState.InProgress) return;
+
+            _turn++;
+
+            DamageResult result = ComboEngine.CalculateDamage(
+                selectedCards, _characters, leaderElement);
+
+            var attackers = new List<BattleCharacter>();
+            var seen      = new HashSet<BattleCharacter>();
+            foreach (var card in selectedCards)
+            {
+                BattleCharacter owner = GetOwnerCharacter(card);
+                if (owner != null && owner.IsAlive && seen.Add(owner))
+                    attackers.Add(owner);
+            }
+
+            foreach (var chara in _characters)
+                if (chara.IsAlive) HateSystem.AddHate(chara, 5f);
+
+            StartCoroutine(RushCoroutine(attackers, result));
+        }
+
+        /// <summary>
+        /// 攻撃キャラが順番に敵へ突進し、全員完了後にダメージを適用するコルーチン。
+        /// </summary>
+        private IEnumerator RushCoroutine(List<BattleCharacter> attackers, DamageResult result)
+        {
+            Vector3 enemyPos = enemy.transform.position;
+
+            foreach (var attacker in attackers)
+            {
+                if (!_characterModels.TryGetValue(attacker, out GameObject model))
+                {
+                    Debug.LogWarning($"[RushCoroutine] {attacker.Name} のモデルが見つかりません。突進をスキップします。");
+                    continue;
+                }
+
+                Vector3 origin     = model.transform.position;
+                Vector3 rushTarget = Vector3.Lerp(origin, enemyPos, 0.7f);
+
+                yield return StartCoroutine(MoveTo(model.transform, origin, rushTarget, 0.3f));
+                yield return new WaitForSeconds(0.1f);
+                yield return StartCoroutine(MoveTo(model.transform, rushTarget, origin, 0.3f));
+                yield return new WaitForSeconds(0.2f);
+            }
+
+            enemy.TakeDamage(result.TotalDamage);
+            LogCombatResult(result);
+
+            if (!enemy.IsAlive)
+            {
+                EndBattle(victory: true);
+                yield break;
+            }
+
+            var aliveChars = _party.AliveCharacters;
+            BattleCharacter target = HateSystem.SelectTarget(_characters);
+            if (target != null && target.IsAlive)
+            {
+                float effHate = HateSystem.GetEffectiveHate(target, aliveChars);
+                target.TakeDamage(enemy.AttackPower);
+                Debug.Log($"[敵の反撃] {enemy.EnemyName} → {target.Name} ({PosJp[target.Position]})  " +
+                          $"実効ヘイト={effHate:F1}  {enemy.AttackPower} ダメージ！  " +
+                          $"HP: {target.CurrentHp}/{target.MaxHp}");
+            }
+
+            if (_party.AliveCharacters.Count == 0)
+            {
+                EndBattle(victory: false);
+                yield break;
+            }
+
+            LogStatus();
+
+            _party.PlayHand();
+            bool reshuffled = _party.DrawHand();
+            if (reshuffled) Debug.Log("[デッキ] リシャッフルしました。");
+            battleUI.ShowHand(_party.Hand);
+        }
+
+        /// <summary>Transform を from から to へ duration 秒かけて線形補間で移動させる。</summary>
+        private IEnumerator MoveTo(Transform t, Vector3 from, Vector3 to, float duration)
+        {
+            if (duration <= 0f)
+            {
+                t.position = to;
+                yield break;
+            }
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                t.position = Vector3.Lerp(from, to, elapsed / duration);
+                elapsed   += Time.deltaTime;
+                yield return null;
+            }
+            t.position = to;
+        }
+
+        /// <summary>コンボ判定結果とダメージ内訳をコンソールに出力する。</summary>
+        private void LogCombatResult(DamageResult result)
+        {
+            ComboResult combo = result.ComboResult;
+            var sb = new StringBuilder();
+            sb.AppendLine($"[コンボ判定] {ComboJp[combo.ComboType]}");
+
+            var parts = new List<string>();
+            for (int i = 0; i < _characters.Length; i++)
+                parts.Add($"{_characters[i].Name}: {result.CharacterDamages[i]:F1}");
+            sb.AppendLine($"[ダメージ内訳] {string.Join(" / ", parts)}");
+            sb.AppendLine($"合計 {result.TotalDamage:F1} ダメージ！（倍率: {combo.TotalMultiplier:F1}x）");
+
+            Debug.Log(sb.ToString());
         }
 
         // -----------------------------------------------------------------
         // ターン処理
         // -----------------------------------------------------------------
 
+        [System.Obsolete("UI経由のカード選択（OnCardsSelected）を使用すること。")]
         /// <summary>
         /// 1ターン分の全処理を実行する。
         /// Python の process_turn() に相当。
@@ -411,6 +545,15 @@ namespace ProjectElements.Battle
         // -----------------------------------------------------------------
         // 内部ヘルパー
         // -----------------------------------------------------------------
+
+        /// <summary>指定した CardData を所持している BattleCharacter を返す。見つからなければ null。</summary>
+        private BattleCharacter GetOwnerCharacter(CardData card)
+        {
+            foreach (var chara in _characters)
+                if (chara.Cards.Any(c => c == card))
+                    return chara;
+            return null;
+        }
 
         /// <summary>
         /// 指定した Position に対応する Transform を返すヘルパーメソッド。

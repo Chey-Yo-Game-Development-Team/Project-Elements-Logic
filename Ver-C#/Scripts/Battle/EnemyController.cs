@@ -2,6 +2,7 @@
 // Python の Enemy dataclass（main.py）を Unity の MonoBehaviour として移植。
 // インスペクターから名前・HP・攻撃力を設定できる。
 
+using System.Collections;
 using UnityEngine;
 
 namespace ProjectElements.Battle
@@ -31,6 +32,11 @@ namespace ProjectElements.Battle
         // ランタイム状態
         // -----------------------------------------------------------------
 
+        private MeshRenderer _meshRenderer;
+        private Material     _instanceMaterial;
+        private Color        _originalColor;
+        private bool _isDying;
+
         /// <summary>現在HP。0 以下で戦闘不能。</summary>
         public int CurrentHp { get; private set; }
 
@@ -54,8 +60,13 @@ namespace ProjectElements.Battle
 
         private void Awake()
         {
-            // Awake 時点で HP を初期化しておく（BattleManager.Initialize() でも呼ばれる）
             CurrentHp = maxHp;
+            _meshRenderer = GetComponent<MeshRenderer>();
+            if (_meshRenderer != null)
+            {
+                _instanceMaterial = _meshRenderer.material;
+                _originalColor    = _instanceMaterial.color;
+            }
         }
 
         // -----------------------------------------------------------------
@@ -67,7 +78,12 @@ namespace ProjectElements.Battle
         /// </summary>
         public void Initialize()
         {
+            StopAllCoroutines();
             CurrentHp = maxHp;
+            _isDying  = false;
+            gameObject.SetActive(true);
+            if (_instanceMaterial != null)
+                _instanceMaterial.color = _originalColor;
         }
 
         /// <summary>
@@ -77,7 +93,35 @@ namespace ProjectElements.Battle
         /// <param name="damage">受けるダメージ量（小数点以下は切り捨て）</param>
         public void TakeDamage(float damage)
         {
+            if (_isDying) return;
+
             CurrentHp = Mathf.Max(0, CurrentHp - Mathf.FloorToInt(damage));
+            if (CurrentHp <= 0)
+            {
+                _isDying = true;
+                StopAllCoroutines();
+                StartCoroutine(DieRoutine());
+            }
+            else
+            {
+                StartCoroutine(HitFlashRoutine());
+            }
+        }
+
+        private IEnumerator HitFlashRoutine()
+        {
+            if (_meshRenderer == null) yield break;
+            _instanceMaterial.color = Color.red;
+            yield return new WaitForSeconds(0.2f);
+            _instanceMaterial.color = _originalColor;
+        }
+
+        private IEnumerator DieRoutine()
+        {
+            if (_instanceMaterial != null)
+                _instanceMaterial.color = Color.gray;
+            yield return new WaitForSeconds(1f);
+            gameObject.SetActive(false);
         }
 
         public override string ToString()
