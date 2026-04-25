@@ -127,15 +127,15 @@ def setup() -> tuple[Party, Enemy]:
 
     characters = [
         Character(
-            name="アリア", max_hp=120,
+            name="アリア", max_hp=120, attack_power=18.0,
             position=Position.FRONT, cards=fire_cards,  base_hate=10.0,
         ),
         Character(
-            name="リン",   max_hp=100,
+            name="リン",   max_hp=100, attack_power=14.0,
             position=Position.MID,   cards=water_cards, base_hate=10.0,
         ),
         Character(
-            name="ルクス", max_hp=80,
+            name="ルクス", max_hp=80,  attack_power=12.0,
             position=Position.BACK,  cards=light_cards, base_hate=10.0,
         ),
     ]
@@ -166,35 +166,32 @@ def process_turn(turn: int, party: Party, enemy: Enemy) -> str | None:
     # ── 1. 手札表示 ──────────────────────────────────────
     hand = party.hand
     print("\n  [手札]")
-    for i, (card, char) in enumerate(zip(hand, party.characters)):
-        is_self = card.owner == char.name
-        self_tag = "  ★自己カード" if is_self else ""
+    for i, card in enumerate(hand):
         print(
-            f"    スロット{i + 1}: [{ATTR_JP[card.attribute]}]  "
+            f"    カード{i + 1}: [{ATTR_JP[card.attribute]}]  "
             f"威力 {card.base_power:>4.0f}  "
-            f"使用者: {char.name} ({POS_JP[char.position]})  "
-            f"[所有者: {card.owner}]{self_tag}"
+            f"[所有者: {card.owner}]"
         )
 
     print()
     pause("3枚すべてプレイ！ ")
 
     # ── 2. コンボ判定・ダメージ計算 ──────────────────────
-    casters = list(party.characters)
-    result  = calculate_damage(hand, casters, leader_attribute=party.leader_attribute)
-    combo   = result.combo_result
+    result = calculate_damage(hand, list(party.characters), leader_attribute=party.leader_attribute)
+    combo  = result.combo_result
 
     print(f"\n  [コンボ判定]")
     print(f"    変換後属性: {' / '.join(ATTR_JP[a] for a in combo.resolved_attributes)}")
     print(f"    成立役    : {COMBO_JP[combo.combo_type]}")
 
+    played_owners = [card.owner for card in hand]
     print(f"\n  [ダメージ内訳]")
-    for i, (card, char, dmg) in enumerate(zip(hand, casters, result.card_damages)):
-        resolved = combo.resolved_attributes[i]
-        bonus = " ★自己カード (+20%)" if card.owner == char.name else ""
+    for char, dmg in zip(party.characters, result.character_damages):
+        has_bonus = char.name in played_owners
+        bonus_tag = " ★所有者一致 (+20%)" if has_bonus else ""
         print(
-            f"    {char.name}: [{ATTR_JP[resolved]}] → "
-            f"{dmg:>7.1f} ダメージ{bonus}"
+            f"    {char.name} ({POS_JP[char.position]}): "
+            f"{dmg:>7.1f} ダメージ{bonus_tag}"
         )
 
     total = result.total_damage

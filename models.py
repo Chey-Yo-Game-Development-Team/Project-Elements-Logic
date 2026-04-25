@@ -44,6 +44,7 @@ class Card:
 class Character:
     name: str
     max_hp: int
+    attack_power: float
     position: Position
     cards: List[Card]
     current_hp: int = field(init=False)

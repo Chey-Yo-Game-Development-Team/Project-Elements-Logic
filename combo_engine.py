@@ -127,47 +127,64 @@ def resolve_jokers(
 
 @dataclass
 class DamageResult:
-    card_damages: List[float]
+    character_damages: List[float]
     combo_result: ComboResult
 
     @property
     def total_damage(self) -> float:
-        return sum(self.card_damages)
+        return sum(self.character_damages)
 
 
 def calculate_damage(
-    cards: List[Card],
-    characters: List[Character],
+    cards: List[Card], # プレイされた3枚のカード
+    characters: List[Character], # パーティメンバー全員（3体）
     leader_attribute: Attribute = Attribute.FIRE,
 ) -> DamageResult:
     """
-    3枚のカードと対応するキャラクターからダメージを計算する。
+    場にプレイされたカードと、パーティキャラクター全員のステータスから各ダメージを計算する。
 
-    - コンボ倍率（ジョーカー変換済み）を適用。
-    - 装備者一致ボーナス（1.2x）: カードをセットしたキャラクターがそのカードを使用した場合に乗算。
+    - 属性コンボ倍率（ジョーカー変換済み）を算出し、全キャラクターの基礎攻撃力に乗算する。
+    - 所有者一致ボーナス（1.2x）:
+      プレイされた3枚のカードの中に、自身の所有するカードが1枚でも含まれているキャラクターの攻撃に適用する。
+    - 生存している全キャラクターが攻撃を行う（自身のカードが選ばれなかったキャラもボーナスなしで攻撃する）。
 
     Args:
-        cards: プレイされた3枚のカード（順序はキャラ対応と一致させること）
-        characters: 各カードを発動するキャラクター（3名、cards と同インデックス対応）
+        cards: 場にプレイされた3枚のカード
+        characters: パーティメンバー全員のリスト（カードとのインデックス同期は不要）
         leader_attribute: 全ジョーカーの場合のフォールバック属性
 
     Returns:
-        各カードのダメージと合計を含む DamageResult
+        各キャラクターが与えるダメージリストとコンボ結果を含む DamageResult
     """
-    if len(cards) != 3 or len(characters) != 3:
-        raise ValueError("カードとキャラクターはそれぞれ3つ必要です")
+    if len(cards) != 3:
+        raise ValueError("プレイされるカードは3枚である必要があります")
 
+    if len(characters) == 0:
+        raise ValueError("攻撃を行うキャラクターがパーティに存在しません")
+
+    # 1. コンボ判定と全体倍率の取得
     combo_result = resolve_jokers(cards, leader_attribute)
-    multipliers = combo_result.get_multipliers()
+    combo_multiplier = combo_result.total_multiplier
 
-    card_damages: List[float] = []
-    for card, char, mult in zip(cards, characters, multipliers):
-        damage = card.base_power * mult
+    # 2. 場に出たカードの所有者（オーナー）をリスト化
+    played_owners = [card.owner for card in cards]
 
-        # 装備者一致ボーナス: カードを装備したキャラクター自身が使用した場合のみ
-        if card.owner == char.name:
+    character_damages: List[float] = []
+
+    # 3. 全キャラクターがそれぞれ攻撃を行う
+    for char in characters:
+        if not char.is_alive:
+            character_damages.append(0.0)
+            continue
+
+        # 基礎攻撃力 × コンボ全体倍率
+        damage = char.attack_power * combo_multiplier
+
+        # 4. 所有者一致ボーナスの判定
+        # 場に出た3枚の中に、自分のカードが1枚でもあればボーナス
+        if char.name in played_owners:
             damage *= 1.2
 
-        card_damages.append(damage)
+        character_damages.append(damage)
 
-    return DamageResult(card_damages=card_damages, combo_result=combo_result)
+    return DamageResult(character_damages=character_damages, combo_result=combo_result)
